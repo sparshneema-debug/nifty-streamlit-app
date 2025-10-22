@@ -1,4 +1,3 @@
-streamlit run app.py
 import streamlit as st
 import pandas as pd
 import yfinance as yf
@@ -98,3 +97,4 @@ st.subheader("Analysis Data")
 st.dataframe(data.tail(30))
 csv = data.to_csv()
 st.download_button("Download CSV", csv, file_name=f"{symbol}_ta_data.csv", mime="text/csv")
+
