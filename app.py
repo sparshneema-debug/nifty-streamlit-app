@@ -9,20 +9,25 @@ import datetime
 st.title("Universal Stock Technical Analyzer (Buy/Hold/Sell Signals)")
 
 # --- User Input for Symbol
-symbol = st.text_input('Enter any Yahoo Finance symbol (e.g. RELIANCE.NS, TCS.NS, AAPL):', 'RELIANCE.NS').strip().upper()
+symbol = st.text_input(
+    'Enter any Yahoo Finance symbol (e.g. RELIANCE.NS, TCS.NS, AAPL):',
+    'RELIANCE.NS'
+).strip().upper()
 
-# --- Date Input
+# --- Date Inputs (end date always today)
 today = datetime.date.today()
 start_default = today - datetime.timedelta(days=365)
-
-start_date = st.date_input("Start date", min_value=datetime.date(2000, 1, 1), max_value=today, value=start_default)
-end_date = st.date_input("End date", min_value=start_date, max_value=today, value=today)
+start_date = st.date_input(
+    "Start date", 
+    min_value=datetime.date(2000, 1, 1), 
+    max_value=today, 
+    value=start_default
+)
+end_date = today
+st.write(f"End date: {end_date} (automatically set to today)")
 
 if start_date >= end_date:
     st.error('Start date must be before end date.')
-    st.stop()
-if end_date > today:
-    st.error('End date cannot be in the future.')
     st.stop()
 
 # --- Download Data
@@ -96,5 +101,9 @@ st.pyplot(fig)
 st.subheader("Analysis Data")
 st.dataframe(data.tail(30))
 csv = data.to_csv()
-st.download_button("Download CSV", csv, file_name=f"{symbol}_ta_data.csv", mime="text/csv")
-
+st.download_button(
+    "Download CSV", 
+    csv, 
+    file_name=f"{symbol}_ta_data.csv", 
+    mime="text/csv"
+)
