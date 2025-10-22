@@ -3,29 +3,36 @@ import pandas as pd
 import yfinance as yf
 from ta.momentum import RSIIndicator
 from ta.trend import MACD, SMAIndicator
-
 import matplotlib.pyplot as plt
 import datetime
 
 st.title("Universal Stock Technical Analyzer (Buy/Hold/Sell Signals)")
 
-# STEP 1: User inputs
-symbol = st.text_input('Enter any stock symbol (e.g. RELIANCE.NS, TCS.NS, INFY.NS, SBIN.NS, AAPL):', 'RELIANCE.NS').strip().upper()
+# --- User Input for Symbol
+symbol = st.text_input('Enter any Yahoo Finance symbol (e.g. RELIANCE.NS, TCS.NS, AAPL):', 'RELIANCE.NS').strip().upper()
 
-end_date = datetime.date.today()
-start_date = st.date_input("Start date", end_date - datetime.timedelta(days=365))
-end_date = st.date_input("End date", end_date)
+# --- Date Input
+today = datetime.date.today()
+max_end_date = today
+default_start = today - datetime.timedelta(days=365)
+
+start_date = st.date_input("Start date", min_value=datetime.date(2000, 1, 1), max_value=max_end_date, value=default_start)
+end_date = st.date_input("End date", min_value=start_date, max_value=max_end_date, value=max_end_date)
+
 if start_date >= end_date:
     st.error('Start date must be before end date.')
     st.stop()
-
-# STEP 2: Download data (handle errors)
-data = yf.download(symbol, start=start_date, end=end_date, auto_adjust=True)
-if data.empty or "Close" not in data.columns:
-    st.warning('No valid data found. Try a different symbol or date range.')
+if end_date > today:
+    st.error('End date cannot be in the future.')
     st.stop()
 
-# STEP 3: Indicators
+# --- Download Data
+data = yf.download(symbol, start=start_date, end=end_date, auto_adjust=True)
+if data.empty or "Close" not in data.columns:
+    st.warning('No valid data found for this ticker and period. Try another symbol or date range.')
+    st.stop()
+
+# --- Calculate Indicators
 data['RSI'] = RSIIndicator(data['Close'], window=14).rsi()
 macd = MACD(data['Close'])
 data['MACD'] = macd.macd()
@@ -33,23 +40,27 @@ data['MACD_Signal'] = macd.macd_signal()
 data['SMA50'] = SMAIndicator(data['Close'], window=50).sma_indicator()
 data['SMA200'] = SMAIndicator(data['Close'], window=200).sma_indicator()
 
-# STEP 4: Recommendation logic (can be expanded)
+# --- Fancier Signal Logic
 def get_signal(row):
-    # Rule: BUY if RSI < 30 and MACD line > MACD signal and price > SMA50; SELL if RSI > 70 or MACD < Signal or price < SMA200; else HOLD
-    if pd.isna(row['RSI']) or pd.isna(row['MACD']) or pd.isna(row['MACD_Signal']) or pd.isna(row['SMA50']) or pd.isna(row['SMA200']):
-        return "NO SIGNAL"
-    if row['RSI'] < 30 and row['MACD'] > row['MACD_Signal'] and row['Close'] > row['SMA50']:
-        return "BUY"
-    elif row['RSI'] > 70 or row['MACD'] < row['MACD_Signal'] or row['Close'] < row['SMA200']:
-        return "SELL"
-    else:
-        return "HOLD"
+    # Golden cross/Death cross
+    if pd.notna(row['SMA50']) and pd.notna(row['SMA200']):
+        if row['SMA50'] > row['SMA200'] and row['MACD'] > row['MACD_Signal'] and row['RSI'] < 35:
+            return "STRONG BUY"
+        if row['SMA50'] < row['SMA200'] and row['MACD'] < row['MACD_Signal'] and row['RSI'] > 65:
+            return "STRONG SELL"
+    # Simpler rules:
+    if pd.notna(row['RSI']):
+        if row['RSI'] < 30:
+            return "BUY"
+        if row['RSI'] > 70:
+            return "SELL"
+    return "HOLD"
 
 data['Signal'] = data.apply(get_signal, axis=1)
-latest_signal = data['Signal'].iloc[-1]
+latest_signal = data['Signal'].dropna().iloc[-1]
 st.subheader(f"Latest Signal for {symbol}: {latest_signal}")
 
-# STEP 5: Plotting
+# --- Plot Prices and Indicators
 st.subheader("Price Chart & Indicators")
 fig, ax = plt.subplots(figsize=(14,6))
 ax.plot(data.index, data['Close'], label='Close', color='black')
@@ -76,7 +87,7 @@ ax.axhline(0, color='grey', alpha=0.5)
 ax.legend()
 st.pyplot(fig)
 
-# STEP 6: Show/download data
+# --- Show and Download Data
 st.subheader("Analysis Data")
 st.dataframe(data.tail(30))
 csv = data.to_csv()
