@@ -1,3 +1,4 @@
+streamlit run app.py
 import streamlit as st
 import pandas as pd
 import yfinance as yf
@@ -13,11 +14,10 @@ symbol = st.text_input('Enter any Yahoo Finance symbol (e.g. RELIANCE.NS, TCS.NS
 
 # --- Date Input
 today = datetime.date.today()
-max_end_date = today
-default_start = today - datetime.timedelta(days=365)
+start_default = today - datetime.timedelta(days=365)
 
-start_date = st.date_input("Start date", min_value=datetime.date(2000, 1, 1), max_value=max_end_date, value=default_start)
-end_date = st.date_input("End date", min_value=start_date, max_value=max_end_date, value=max_end_date)
+start_date = st.date_input("Start date", min_value=datetime.date(2000, 1, 1), max_value=today, value=start_default)
+end_date = st.date_input("End date", min_value=start_date, max_value=today, value=today)
 
 if start_date >= end_date:
     st.error('Start date must be before end date.')
@@ -32,17 +32,23 @@ if data.empty or "Close" not in data.columns:
     st.warning('No valid data found for this ticker and period. Try another symbol or date range.')
     st.stop()
 
+# --- Defensive handling for Close prices
+close_prices = data['Close'].squeeze()
+if not isinstance(close_prices, pd.Series) or close_prices.empty:
+    st.warning('Close price data not available or invalid shape.')
+    st.stop()
+
 # --- Calculate Indicators
-data['RSI'] = RSIIndicator(data['Close'], window=14).rsi()
-macd = MACD(data['Close'])
+data['RSI'] = RSIIndicator(close_prices, window=14).rsi()
+macd = MACD(close_prices)
 data['MACD'] = macd.macd()
 data['MACD_Signal'] = macd.macd_signal()
-data['SMA50'] = SMAIndicator(data['Close'], window=50).sma_indicator()
-data['SMA200'] = SMAIndicator(data['Close'], window=200).sma_indicator()
+data['SMA50'] = SMAIndicator(close_prices, window=50).sma_indicator()
+data['SMA200'] = SMAIndicator(close_prices, window=200).sma_indicator()
 
-# --- Fancier Signal Logic
+# --- Multi-indicator Signal Logic
 def get_signal(row):
-    # Golden cross/Death cross
+    # Golden/Death cross, MACD, RSI
     if pd.notna(row['SMA50']) and pd.notna(row['SMA200']):
         if row['SMA50'] > row['SMA200'] and row['MACD'] > row['MACD_Signal'] and row['RSI'] < 35:
             return "STRONG BUY"
