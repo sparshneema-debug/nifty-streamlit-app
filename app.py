@@ -49,28 +49,35 @@ data['MACD_Signal'] = macd.macd_signal()
 data['SMA50'] = SMAIndicator(close_prices, window=50).sma_indicator()
 data['SMA200'] = SMAIndicator(close_prices, window=200).sma_indicator()
 
+indicator_cols = ['RSI', 'MACD', 'MACD_Signal', 'SMA50', 'SMA200']
+# --- Protection: Only proceed if there's at least one row with all technicals populated
+if data[indicator_cols].dropna().empty:
+    st.error("Not enough indicator data for signal generation. Try a longer date range or another stock.")
+    st.write("Recent indicator values (for debugging):")
+    st.write(data[indicator_cols].tail(10))
+    st.stop()
+
 # --- Signal Logic: Fallback to simpler check if NaNs present
 def get_signal(row):
-    # Try full logic if all available:
-    required = ['SMA50', 'SMA200', 'MACD', 'MACD_Signal', 'RSI']
-    if all(pd.notna(row[c]) for c in required):
-        if row['SMA50'] > row['SMA200'] and row['MACD'] > row['MACD_Signal'] and row['RSI'] < 35:
-            return "STRONG BUY"
-        if row['SMA50'] < row['SMA200'] and row['MACD'] < row['MACD_Signal'] and row['RSI'] > 65:
-            return "STRONG SELL"
-    # Fallback: use just RSI if that's all we've got
-    if pd.notna(row['RSI']):
-        if row['RSI'] < 30:
-            return "BUY"
-        if row['RSI'] > 70:
-            return "SELL"
-        return "HOLD"
-    # If nothing usable, signal missing
-    return "NO SIGNAL"
+    try:
+        required = ['SMA50', 'SMA200', 'MACD', 'MACD_Signal', 'RSI']
+        if all(pd.notna(row[c]) for c in required):
+            if row['SMA50'] > row['SMA200'] and row['MACD'] > row['MACD_Signal'] and row['RSI'] < 35:
+                return "STRONG BUY"
+            if row['SMA50'] < row['SMA200'] and row['MACD'] < row['MACD_Signal'] and row['RSI'] > 65:
+                return "STRONG SELL"
+        if pd.notna(row['RSI']):
+            if row['RSI'] < 30:
+                return "BUY"
+            if row['RSI'] > 70:
+                return "SELL"
+            return "HOLD"
+        return "NO SIGNAL"
+    except Exception:
+        return "NO SIGNAL"
 
 data['Signal'] = data.apply(get_signal, axis=1)
 
-# --- Find latest non-NA signal (always works with fallback logic)
 latest_signal = data['Signal'][data['Signal'] != "NO SIGNAL"].iloc[-1] if (data['Signal'] != "NO SIGNAL").any() else "NO SIGNAL (not enough indicator data)"
 
 st.subheader(f"Latest Signal for {symbol}: {latest_signal}")
