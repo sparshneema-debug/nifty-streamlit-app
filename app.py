@@ -14,9 +14,9 @@ symbol = st.text_input(
     'RELIANCE.NS'
 ).strip().upper()
 
-# --- Date Inputs (end date always today)
+# --- Date Inputs (2 years default!)
 today = datetime.date.today()
-start_default = today - datetime.timedelta(days=365)
+start_default = today - datetime.timedelta(days=730)  # 2 years for indicators!
 start_date = st.date_input(
     "Start date", 
     min_value=datetime.date(2000, 1, 1), 
@@ -36,7 +36,7 @@ if data.empty or "Close" not in data.columns:
     st.warning('No valid data found for this ticker and period. Try another symbol or date range.')
     st.stop()
 
-# --- Defensive handling for Close prices
+# --- Handle Close prices
 close_prices = data['Close'].squeeze()
 if not isinstance(close_prices, pd.Series) or close_prices.empty:
     st.warning('Close price data not available or invalid shape.')
@@ -50,36 +50,35 @@ data['MACD_Signal'] = macd.macd_signal()
 data['SMA50'] = SMAIndicator(close_prices, window=50).sma_indicator()
 data['SMA200'] = SMAIndicator(close_prices, window=200).sma_indicator()
 
-# --- Multi-indicator Signal Logic (robust to missing data)
+# --- Signal Logic: Fallback to simpler check if NaNs present
 def get_signal(row):
-    try:
-        # Check for required data present
-        if any(pd.isna(row[col]) for col in ['SMA50', 'SMA200', 'MACD', 'MACD_Signal', 'RSI']):
-            return "NO SIGNAL"
+    # Try full logic if all available:
+    required = ['SMA50', 'SMA200', 'MACD', 'MACD_Signal', 'RSI']
+    if all(pd.notna(row[c]) for c in required):
         if row['SMA50'] > row['SMA200'] and row['MACD'] > row['MACD_Signal'] and row['RSI'] < 35:
             return "STRONG BUY"
         if row['SMA50'] < row['SMA200'] and row['MACD'] < row['MACD_Signal'] and row['RSI'] > 65:
             return "STRONG SELL"
+    # Fallback: use just RSI if that's all we've got
+    if pd.notna(row['RSI']):
         if row['RSI'] < 30:
             return "BUY"
         if row['RSI'] > 70:
             return "SELL"
         return "HOLD"
-    except Exception:
-        return "NO SIGNAL"
+    # If nothing usable, signal missing
+    return "NO SIGNAL"
 
-# Only compute signals if there's at least one row of full data
-indicator_cols = ['RSI', 'MACD', 'MACD_Signal', 'SMA50', 'SMA200']
-data['Signal'] = "NO SIGNAL"
-if not data[indicator_cols].dropna().empty:
-    data.loc[data[indicator_cols].notna().all(axis=1), 'Signal'] = data.loc[data[indicator_cols].notna().all(axis=1)].apply(get_signal, axis=1)
+data['Signal'] = data.apply(get_signal, axis=1)
 
-if data['Signal'].dropna().eq("NO SIGNAL").all():
-    latest_signal = "NO SIGNAL (not enough data. Try a longer date range!)"
-else:
-    latest_signal = data['Signal'].dropna().iloc[-1]
+# --- Find latest non-NA signal (always works with fallback logic)
+latest_signal = data['Signal'][data['Signal'] != "NO SIGNAL"].iloc[-1] if (data['Signal'] != "NO SIGNAL").any() else "NO SIGNAL (not enough indicator data)"
 
 st.subheader(f"Latest Signal for {symbol}: {latest_signal}")
+
+# --- Show diagnostics for indicator values (last 10 rows)
+st.write("Recent indicator values (for diagnostics, check for NaNs):")
+st.write(data[['RSI', 'MACD', 'MACD_Signal', 'SMA50', 'SMA200', 'Signal']].tail(10))
 
 # --- Plot Prices and Indicators
 st.subheader("Price Chart & Indicators")
