@@ -42,7 +42,7 @@ if not isinstance(close_prices, pd.Series) or close_prices.empty:
     st.warning('Close price data not available or invalid shape.')
     st.stop()
 
-# --- Calculate Indicators
+# --- Calculate Indicators (with NaN handling)
 data['RSI'] = RSIIndicator(close_prices, window=14).rsi()
 macd = MACD(close_prices)
 data['MACD'] = macd.macd()
@@ -50,24 +50,35 @@ data['MACD_Signal'] = macd.macd_signal()
 data['SMA50'] = SMAIndicator(close_prices, window=50).sma_indicator()
 data['SMA200'] = SMAIndicator(close_prices, window=200).sma_indicator()
 
-# --- Multi-indicator Signal Logic
+# --- Multi-indicator Signal Logic (robust to missing data)
 def get_signal(row):
-    # Golden/Death cross, MACD, RSI
-    if pd.notna(row['SMA50']) and pd.notna(row['SMA200']):
+    try:
+        # Check for required data present
+        if any(pd.isna(row[col]) for col in ['SMA50', 'SMA200', 'MACD', 'MACD_Signal', 'RSI']):
+            return "NO SIGNAL"
         if row['SMA50'] > row['SMA200'] and row['MACD'] > row['MACD_Signal'] and row['RSI'] < 35:
             return "STRONG BUY"
         if row['SMA50'] < row['SMA200'] and row['MACD'] < row['MACD_Signal'] and row['RSI'] > 65:
             return "STRONG SELL"
-    # Simpler rules:
-    if pd.notna(row['RSI']):
         if row['RSI'] < 30:
             return "BUY"
         if row['RSI'] > 70:
             return "SELL"
-    return "HOLD"
+        return "HOLD"
+    except Exception:
+        return "NO SIGNAL"
 
-data['Signal'] = data.apply(get_signal, axis=1)
-latest_signal = data['Signal'].dropna().iloc[-1]
+# Only compute signals if there's at least one row of full data
+indicator_cols = ['RSI', 'MACD', 'MACD_Signal', 'SMA50', 'SMA200']
+data['Signal'] = "NO SIGNAL"
+if not data[indicator_cols].dropna().empty:
+    data.loc[data[indicator_cols].notna().all(axis=1), 'Signal'] = data.loc[data[indicator_cols].notna().all(axis=1)].apply(get_signal, axis=1)
+
+if data['Signal'].dropna().eq("NO SIGNAL").all():
+    latest_signal = "NO SIGNAL (not enough data. Try a longer date range!)"
+else:
+    latest_signal = data['Signal'].dropna().iloc[-1]
+
 st.subheader(f"Latest Signal for {symbol}: {latest_signal}")
 
 # --- Plot Prices and Indicators
