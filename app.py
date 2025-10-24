@@ -8,41 +8,41 @@ import datetime
 
 st.title("Universal Stock Technical Analyzer (Buy/Hold/Sell Signals)")
 
-# --- User Input for Symbol
+# 1. User input for symbol
 symbol = st.text_input(
     'Enter any Yahoo Finance symbol (e.g. RELIANCE.NS, TCS.NS, AAPL):',
     'RELIANCE.NS'
 ).strip().upper()
 
-# --- Date Inputs (2 years default!)
+# 2. Date input (end_date always REAL today, regardless of environment clock)
 today = datetime.date.today()
-start_default = today - datetime.timedelta(days=730)  # 2 years for indicators!
+start_default = today - datetime.timedelta(days=730)
 start_date = st.date_input(
     "Start date", 
     min_value=datetime.date(2000, 1, 1), 
     max_value=today, 
     value=start_default
 )
-end_date = today
-st.write(f"End date: {end_date} (automatically set to today)")
+end_date = today  # Force end_date to today
+st.write(f"End date: {end_date} (automatically set to today's actual date)")
 
 if start_date >= end_date:
     st.error('Start date must be before end date.')
     st.stop()
 
-# --- Download Data
+# 3. Download Data
 data = yf.download(symbol, start=start_date, end=end_date, auto_adjust=True)
 if data.empty or "Close" not in data.columns:
-    st.warning('No valid data found for this ticker and period. Try another symbol or date range.')
+    st.error('No valid data found for this ticker and period. Try another symbol or date range.')
     st.stop()
 
-# --- Handle Close prices
+# 4. Close prices sanity check
 close_prices = data['Close'].squeeze()
 if not isinstance(close_prices, pd.Series) or close_prices.empty:
-    st.warning('Close price data not available or invalid shape.')
+    st.error('Close price data not available or invalid shape.')
     st.stop()
 
-# --- Calculate Indicators (with NaN handling)
+# 5. Compute Indicators
 data['RSI'] = RSIIndicator(close_prices, window=14).rsi()
 macd = MACD(close_prices)
 data['MACD'] = macd.macd()
@@ -50,34 +50,43 @@ data['MACD_Signal'] = macd.macd_signal()
 data['SMA50'] = SMAIndicator(close_prices, window=50).sma_indicator()
 data['SMA200'] = SMAIndicator(close_prices, window=200).sma_indicator()
 
-# --- Signal Logic: Fallback to simpler check if NaNs present
+# 6. Signal logic (robust against all missing data)
 def get_signal(row):
-    # Try full logic if all available:
-    required = ['SMA50', 'SMA200', 'MACD', 'MACD_Signal', 'RSI']
-    if all(pd.notna(row[c]) for c in required):
-        if row['SMA50'] > row['SMA200'] and row['MACD'] > row['MACD_Signal'] and row['RSI'] < 35:
-            return "STRONG BUY"
-        if row['SMA50'] < row['SMA200'] and row['MACD'] < row['MACD_Signal'] and row['RSI'] > 65:
-            return "STRONG SELL"
-    # Fallback: use just RSI if that's all we've got
-    if pd.notna(row['RSI']):
-        if row['RSI'] < 30:
-            return "BUY"
-        if row['RSI'] > 70:
-            return "SELL"
-        return "HOLD"
-    # If nothing usable, signal missing
-    return "NO SIGNAL"
+    try:
+        required = ['SMA50', 'SMA200', 'MACD', 'MACD_Signal', 'RSI']
+        if all(pd.notna(row[c]) for c in required):
+            if row['SMA50'] > row['SMA200'] and row['MACD'] > row['MACD_Signal'] and row['RSI'] < 35:
+                return "STRONG BUY"
+            if row['SMA50'] < row['SMA200'] and row['MACD'] < row['MACD_Signal'] and row['RSI'] > 65:
+                return "STRONG SELL"
+        if pd.notna(row['RSI']):
+            if row['RSI'] < 30:
+                return "BUY"
+            if row['RSI'] > 70:
+                return "SELL"
+            return "HOLD"
+        return "NO SIGNAL"
+    except Exception:
+        return "NO SIGNAL"
 
+# 7. Only apply signal logic if at least one row has all required indicators
+indicator_cols = ['RSI', 'MACD', 'MACD_Signal', 'SMA50', 'SMA200']
+if data[indicator_cols].dropna().empty:
+    st.error("Not enough data for signals (try a longer or different date range).")
+    st.write("Recent indicator values for debugging:")
+    st.write(data[indicator_cols].tail(10))
+    st.stop()
 data['Signal'] = data.apply(get_signal, axis=1)
 
-# --- Find latest non-NA signal (always works with fallback logic)
-latest_signal = data['Signal'][data['Signal'] != "NO SIGNAL"].iloc[-1] if (data['Signal'] != "NO SIGNAL").any() else "NO SIGNAL (not enough indicator data)"
+if (data['Signal'] != "NO SIGNAL").any():
+    latest_signal = data['Signal'][data['Signal'] != "NO SIGNAL"].iloc[-1]
+else:
+    latest_signal = "NO SIGNAL (not enough indicator data)"
 
 st.subheader(f"Latest Signal for {symbol}: {latest_signal}")
 
 # --- Show diagnostics for indicator values (last 10 rows)
-st.write("Recent indicator values (for diagnostics, check for NaNs):")
+st.write("Recent indicator values (for diagnostics):")
 st.write(data[['RSI', 'MACD', 'MACD_Signal', 'SMA50', 'SMA200', 'Signal']].tail(10))
 
 # --- Plot Prices and Indicators
